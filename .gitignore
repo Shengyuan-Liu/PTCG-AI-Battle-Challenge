@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# big pdf
+Card_ID List_EN.pdf
+Card_ID List_JP.pdf
+*.pdf
+
+# Japenese Docs
+*JP*
+
+# keep sample_submission
+!sample_submission/cg/libcg.so
