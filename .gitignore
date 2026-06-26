@@ -225,5 +225,15 @@ Card_ID List_JP.pdf
 # Japenese Docs
 *JP*
 
+# Kaggle replay data (bulk, ~4MB each / ~20GB per day — never commit)
+data/replay/
+data/episodes/
+data/episodes-index/*
+!data/episodes-index/manifest.csv
+
+# 训练产物（权重 / 先验缓存，别进仓库）
+model/out/
+data/replay_prior.json
+
 # keep sample_submission
 !sample_submission/cg/libcg.so
