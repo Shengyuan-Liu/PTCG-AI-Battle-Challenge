@@ -278,6 +278,44 @@ python -m model.selfplay --init-weights model/out/sl_init.pth --iterations 5
 - 默认：`SEARCH_COUNT=10`、`MyModel(128,2,256,1,1)`、AdamW lr=3e-4、HuberLoss（value δ=0.2 / policy δ=0.1）、self-play value 用 TD(λ=0.9)。
 - ⚠️ 待办：**尚未做长训**（多轮 self-play）以验证改进①②对胜率的实际增益——见 §8。样例无改进时 5 轮自对弈到 76% vs random，可作对照基线。
 
+### 9.5 训练实测与结论（2026-06-27，本机 4080 Laptop + 32 核）
+
+**基础设施**：`model/parallel_selfplay.py` = 多进程并行 self-play（24 worker，每进程独立引擎 +
+CPU 单线程推理）+ 主进程 GPU 训练。实测 collect ≈ 8s（搜索10）/ 14–23s（搜索20），train < 1s。
+评估/对战用 `model/arena.py`（支持 `model:<path>` / `rule` / `random` 对手）。
+
+**关键发现（用「对 rule-based agent 胜率」做判别尺子，打随机对手都 90%+ 无区分度）**：
+
+| 模型 | vs rule | 说明 |
+|---|---|---|
+| `sl_init`（纯 SL warm-start） | ~59% | 起步即 92% vs random（样例从零是 20%）→ **改进② SL 预热价值确凿** |
+| `model4`（SL + RL 4 轮，lr=3e-4） | **64%** | 头对头打 sl_init 也 57%（80–60/140 局）→ 早期 RL **确有提升** |
+| `model12`（RL 12 轮） | 46% | 比 SL 还差 → **RL 跑久了自毁** |
+
+**核心结论：当前 self-play RL 会系统性腐蚀强 SL 初始策略。**
+- 第一轮 lr=3e-4：win% 序列 `92,85,85,94,94,90,60,48,69,88,88,77,81`（vs random），高方差 + 无上升趋势。
+- 第二轮「修正版」（lr=3e-5、搜索20、对 rule 评估、keep-best+早停）：`53,53,35,20,27` **单调退化**，4 轮无新高早停 → 证明降 lr/加搜索**没救回**，问题在算法本身。
+- 推断根因：① 样例的 **policy 标签是非标准 advantage**（非 AlphaZero 访问次数分布），浅搜索下噪声大；② **无 SL 锚**→灾难性遗忘；③ **自己打退化的自己**→负反馈螺旋；④ 我们 replay 少（仅 12 个→613 SL 样本 / 19 副先验），数据不足。
+
+**当前最佳交付**：`model/out/model_final.pth = model4`（64% vs rule，经多局验证）。`model4_backup.pth`、`sl_init.pth` 一并保留。
+
+**已实现的修复（`--mode az`，`parallel_selfplay.py` + `selfplay.train_on_az`）**：
+1. ✅ **早停 + keep-best**（`--eval-opponent rule`、`--patience`）——保证交付不退化。
+2. ✅ **标准 AlphaZero policy 标签**：MCTS **访问次数分布** + 交叉熵（`mcts_agent(policy_target="visit")`），替掉 advantage 回归；value 目标 = 最终胜负 z。
+3. ✅ **SL 锚**：每轮训练混入 613 个 replay 行为克隆 one-hot 样本，防遗忘。
+
+**AZ 实验结果（lr=1e-4、搜索20、SL锚、对 rule 评估）**：
+- win% 序列 `60,70,45,63,63,45,58`（早停）——**震荡但不再单调崩**（对比 advantage 的 `53→35→20`）。**修复成功解决了灾难性自毁**。
+- 但 **AZ 最佳(70% vs rule) 头对头打 model4 = 102–98 = 51%**（200 局），**统计平手**——AZ 没能显著超过 SL+早期RL 的 baseline。
+
+**最终结论：算法修复让训练「稳定不自毁」（重要），但当前数据/搜索预算下 RL 摸不到更高天花板。瓶颈是数据与搜索深度，不是算法。**
+
+**真正能突破的下一步（按 ROI）**：
+1. **更多 replay**（最高优先）：`tools/download_replays.py` 多拉几天 → 更强 SL + 更准 prior + 更厚 SL 锚。当前仅 12 个 replay（613 SL 样本 / 19 副先验）严重受限。
+2. **更深搜索**（30–50）让访问次数分布更可信（20 次太浅，分布噪声大）。
+3. **冻结强对手池**（model4 + rule + 历史版本）替自对弈，信号更稳。
+4. **更大评估局数**（当前 60 局 ±12% 噪声）以可靠选最佳。
+
 ## 8. 待定 / TODO
 
 - [ ] observation→张量 的**精确特征清单与维度**（先实现 DeepSets 版并固定 schema）。

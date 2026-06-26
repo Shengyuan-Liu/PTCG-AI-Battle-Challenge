@@ -111,6 +111,55 @@ def train_on(model, optimizer, samples: list[LearnSample], device, batch_size: i
         optimizer.step()
 
 
+def train_on_az(model, optimizer, samples, device, batch_size: int = 128):
+    """标准 AlphaZero 损失：value Huber + policy 交叉熵（masked，与推理一致的 *10 缩放）。
+
+    samples 的 .policy 是「该样本各动作上的概率分布」（和为 1）：
+      self-play 样本 = MCTS 访问次数分布；SL 锚样本 = 专家动作 one-hot。
+    """
+    import torch.nn.functional as F
+    loss_fn_v = torch.nn.HuberLoss(delta=0.2)
+    model.train()
+    random.shuffle(samples)
+    for i in range(len(samples) // batch_size):
+        in_enc, in_dec = LearnInput(), LearnInput()
+        mask, label_v, target_p = [], [], []
+        for s in samples[batch_size * i: batch_size * (i + 1)]:
+            in_enc.add(s.sv_enc)
+            in_dec.add(s.sv_dec)
+            label_v.append(s.value)
+            tot = sum(s.policy) or 1.0
+            target_p.extend(p / tot for p in s.policy)       # 归一化成分布
+            mask.extend([1.0] * len(s.policy))
+            for _ in range(64 - len(s.policy)):
+                mask.append(0.0); target_p.append(0.0)
+                in_dec.offset.append(len(in_dec.index))
+        mt = torch.tensor(mask, dtype=torch.float32, device=device).view(batch_size, -1)
+        lv = torch.tensor(label_v, dtype=torch.float32, device=device).view(batch_size, -1)
+        tp = torch.tensor(target_p, dtype=torch.float32, device=device).view(batch_size, -1)
+        optimizer.zero_grad()
+        out_enc, out_dec = model(
+            torch.tensor(in_enc.index, dtype=torch.int32, device=device),
+            torch.tensor(in_enc.value, dtype=torch.float32, device=device),
+            torch.tensor(in_enc.offset, dtype=torch.int32, device=device),
+            torch.tensor(in_dec.index, dtype=torch.int32, device=device),
+            torch.tensor(in_dec.value, dtype=torch.float32, device=device),
+            torch.tensor(in_dec.offset, dtype=torch.int32, device=device))
+        logits = (out_dec * 10.0).masked_fill(mt == 0, -1e9)  # 与 create_node 的 exp(p*10) 一致
+        logp = F.log_softmax(logits, dim=1)
+        loss_p = -(tp * logp).sum(dim=1).mean()
+        loss = loss_fn_v(out_enc, lv) + loss_p
+        loss.backward()
+        optimizer.step()
+
+
+def to_onehot_policy(sample):
+    """把 SL 的 [+1/-1] advantage 标签转成 one-hot 分布（给 AZ 交叉熵当 SL 锚）。"""
+    k = max(range(len(sample.policy)), key=lambda j: sample.policy[j])
+    sample.policy = [1.0 if j == k else 0.0 for j in range(len(sample.policy))]
+    return sample
+
+
 def train(iterations=5, eval_games=20, selfplay_games=40, searches=10,
           deck_path="sample_submission/deck.csv", init_weights=None, out_dir="model/out"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

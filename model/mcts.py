@@ -126,8 +126,13 @@ def create_node(parent, search_state: SearchState, your_index: int,
 
 def mcts_agent(obs_dict: dict, your_deck: list[int], model,
                opp_prior: OpponentPrior, num_searches: int = SEARCH_COUNT,
-               rng: random.Random = random):
-    """跑一次 MCTS，返回 (选择的 option 下标列表, 训练样本 LearnSample)。"""
+               rng: random.Random = random, policy_target: str = "advantage"):
+    """跑一次 MCTS，返回 (选择的 option 下标列表, 训练样本 LearnSample)。
+
+    policy_target:
+      "advantage" —— 样例原版（子优势裁剪，配 Huber 回归）。
+      "visit"     —— 标准 AlphaZero：归一化访问次数分布（配交叉熵）。sample.policy 存分布。
+    """
     obs = to_observation_class(obs_dict)
     your_index = obs.current.yourIndex
 
@@ -172,17 +177,28 @@ def mcts_agent(obs_dict: dict, your_deck: list[int], model,
             v = child.node.total / child.node.visit
             min_value = min(min_value, v)
 
-    # 生成训练标签（同样例：value=根均值；policy=子优势裁剪）
+    # 生成训练标签
     if sample is not None and root.children:
         sample.value = root.total / root.visit
-        for i, child in enumerate(root.children):
-            if i >= len(sample.policy):
-                break
-            if child.node is None:
-                v = min_value - sample.value - 0.03
+        if policy_target == "visit":
+            # 标准 AlphaZero：policy 目标 = 归一化访问次数分布
+            visits = [(child.node.visit if child.node is not None else 0) for child in root.children]
+            tot = sum(visits)
+            n = len(sample.policy)
+            if tot > 0:
+                dist = [v / tot for v in visits]
             else:
-                v = child.node.total / child.node.visit - sample.value
-            sample.policy[i] = max(-1.0, min(1.0, v))
+                dist = [1.0 / len(root.children)] * len(root.children)
+            sample.policy = (dist + [0.0] * n)[:n]
+        else:
+            for i, child in enumerate(root.children):
+                if i >= len(sample.policy):
+                    break
+                if child.node is None:
+                    v = min_value - sample.value - 0.03
+                else:
+                    v = child.node.total / child.node.visit - sample.value
+                sample.policy[i] = max(-1.0, min(1.0, v))
 
     search_end()
     if max_child is None:                       # 极端兜底：没展开任何子节点

@@ -231,8 +231,10 @@ data/episodes/
 data/episodes-index/*
 !data/episodes-index/manifest.csv
 
-# 训练产物（权重 / 先验缓存，别进仓库）
+# 训练产物（权重 / 先验缓存 / 日志，别进仓库）
 model/out/
+model/out_az/
+model/*.log
 data/replay_prior.json
 
 # keep sample_submission
