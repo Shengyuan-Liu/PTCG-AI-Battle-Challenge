@@ -180,5 +180,8 @@ PTCG-AI-Battle-Challenge/            # git 仓库根（已迁到 macOS）
 - **引擎相关一律在远程 Linux x86-64（或 Windows）跑**；Mac 本地只做纯 Python（`.venv`，`numpy/pandas`）。远程用 Python 3.10–3.13。
 - 原生引擎是**单例**：`Battle.battle_ptr`（对局）/ `agent_ptr`（搜索，`cg.api` 模块级全局）全局共享；一局结束需 `battle_finish()` 释放。
 - 提交包必须含 `libcg.so`（已确认被 git 跟踪、未被 `.gitignore` 的 `*.so` 忽略）；`main.py` 须在 tar 顶层。
+- **每次 `kaggle competitions submit` 之后，必须立刻更新 `docs/last_submission.md`**（模型/训练/数据/评估/天梯分/复现命令 + 提交历史表）。这是提交流程的强制步骤。
+- **提交入口 `main.py` 顶层禁用 `__file__`**：`kaggle_environments` 用 `exec()` 跑 main.py，该上下文无 `__file__` → `NameError` → 提交直接 ERROR（曾踩，见 `docs/model.md` §9.6）。用 `try/except NameError` 容错。提交前本地用 `exec(compile(open("main.py").read(),"main.py","exec"), {})` 复现验证。
+- **评估别只信"vs 自家 rule"**：rule 本身低于天梯均值，本地胜率高 ≠ 天梯强（v5 本地 60% vs rule 却天梯 501<rule544）。**天梯才是最终裁判**；NN 强度瓶颈是真实 replay 数据量。
 - card ID `3` = Basic {W} Energy。当前 `sample_submission/deck.csv` = 35×3(水能量) + 4×{723,722,1235,1227,1145} + 2×{721,1205} + 1×1158，共 60。
 - 写 agent 对未知 Enum 值/缺失字段要**防御性容错**（官方注释多处提示比赛期间会新增）。
