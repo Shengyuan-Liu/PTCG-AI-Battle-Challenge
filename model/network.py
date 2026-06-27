@@ -79,10 +79,25 @@ def eval_nn(sv_enc: SparseVector, sv_dec: SparseVector, model: MyModel):
     return value.tolist()[0][0], policy.tolist()[0]
 
 
-def new_model(device=None) -> MyModel:
+# 网络架构（训练与 agent 推理共用此处，保证一致）。
+# 旧版 v4 = (128, 2, 256, 1, 1)。纯 NN 单次前向后无搜索延迟压力 → 放大。
+# 可用环境变量覆盖（便于扫超参，不改码）：PTCG_DMODEL / PTCG_HEADS / PTCG_FF / PTCG_ENC / PTCG_DEC
+import os as _os
+ARCH = dict(
+    d_model=int(_os.getenv("PTCG_DMODEL", 256)),
+    num_heads=int(_os.getenv("PTCG_HEADS", 4)),
+    d_feedforward=int(_os.getenv("PTCG_FF", 1024)),
+    num_layers_encoder=int(_os.getenv("PTCG_ENC", 3)),
+    num_layers_decoder=int(_os.getenv("PTCG_DEC", 3)),
+)
+
+
+def new_model(device=None, **override) -> MyModel:
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return MyModel(128, 2, 256, 1, 1).to(device)
+    cfg = {**ARCH, **override}
+    return MyModel(cfg["d_model"], cfg["num_heads"], cfg["d_feedforward"],
+                   cfg["num_layers_encoder"], cfg["num_layers_decoder"]).to(device)
 
 
 class LearnInput:

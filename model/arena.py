@@ -44,9 +44,27 @@ def _get_model(path):
     return _S["models"][path]
 
 
+def _policy_move(obs, model):
+    """纯 NN 单次前向选招（与部署一致，无 MCTS）。"""
+    import torch
+    from .encoding import enumerate_actions, get_decoder_input, get_encoder_input
+    from .network import eval_nn
+    actions = enumerate_actions(obs)
+    if not actions:
+        return []
+    sv_e = get_encoder_input(obs, _S["deck"])
+    sv_d = get_decoder_input(obs, actions)
+    with torch.inference_mode():
+        _, policy = eval_nn(sv_e, sv_d, model)
+    k = max(range(len(actions)), key=lambda j: policy[j] if j < len(policy) else -9.0)
+    return actions[k]
+
+
 def _act(spec, obs):
     from cg.api import to_observation_class
-    if spec.startswith("model:"):
+    if spec.startswith("policy:"):                       # 纯 NN（部署用的）
+        return _policy_move(to_observation_class(obs), _get_model(spec[7:]))
+    if spec.startswith("model:"):                        # MCTS + NN
         model = _get_model(spec[6:])
         sel, _ = mcts_agent(obs, _S["deck"], model, _S["prior"], num_searches=_S["searches"])
         return sel

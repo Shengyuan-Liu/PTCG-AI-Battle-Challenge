@@ -237,5 +237,9 @@ model/out_az/
 model/*.log
 data/replay_prior.json
 
+# 提交构建产物（可由 model/ 重新生成，46MB 不进仓库）
+submission/
+submission.tar.gz
+
 # keep sample_submission
 !sample_submission/cg/libcg.so
